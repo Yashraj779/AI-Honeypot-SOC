@@ -189,6 +189,28 @@ http://127.0.0.1:5000
 
 # 📸 Screenshots
 
+## Login Page
+
+![Login Page](screenshots/login.png)
+
+## Dashboard
+
+![Dashboard](screenshots/Dashboard.png)
+
+## Recent Activity
+
+![Recent Activity](screenshots/Recent_Activity.png)
+
+
+## Attack Timeline
+
+![Timeline](screenshots/Attack_Timeline.png)
+
+
+## Attack Origin Map
+
+![Map](screenshots/Map.png)
+
 
 
 # 🔮 Future Improvements
