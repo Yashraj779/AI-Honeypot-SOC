@@ -189,18 +189,7 @@ http://127.0.0.1:5000
 
 # 📸 Screenshots
 
-Add screenshots after pushing the project.
 
-Suggested screenshots:
-
-- Login Page
-- Dashboard
-- ML Prediction Table
-- Attack Distribution Chart
-- Timeline
-- Attack Origin Map
-
----
 
 # 🔮 Future Improvements
 
