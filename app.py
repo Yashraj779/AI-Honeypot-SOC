@@ -1,183 +1,159 @@
-from flask import Flask, render_template, request, redirect, jsonify
-from pymongo import MongoClient
-from datetime import datetime, timedelta
 from collections import Counter, defaultdict
-import requests
-import os
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+from flask import Flask, jsonify, redirect, render_template, request
+
+from ai_engine import classify_attack, generate_ai_summary, generate_risk_score
+from config import Config
+from database import logs_collection
+from utils import get_client_ip, get_geo, get_user_agent
 
 app = Flask(__name__)
+app.config.from_object(Config)
 
-# DATABASE CONNECTION
-MONGO_URI = os.environ.get(
-    "MONGO_URI",
-    "mongodb+srv://yashrajjangir911_db_user:SFtVMClOfeOYKajL@cluster0.4m1ajuj.mongodb.net/?appName=Cluster0"
-)
-
-client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
-
-db = client["ai_honeypot"]
-logs_collection = db["logs"]
+IST = ZoneInfo("Asia/Kolkata")
 
 
-# ATTACK CLASSIFICATION
-def classify_attack(ip, username, password):
+def to_ist_display_time(timestamp):
+    """Convert a MongoDB timestamp to IST display text."""
 
-    now = datetime.utcnow()
+    if not timestamp:
+        return "N/A"
 
-    attempt_count = logs_collection.count_documents({"ip": ip})
+    if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
 
-    same_password_count = logs_collection.count_documents({
-        "ip": ip,
-        "password": password
-    })
-
-    recent_attempts = logs_collection.count_documents({
-        "ip": ip,
-        "timestamp": {"$gte": now - timedelta(seconds=10)}
-    })
-
-    attack_type = "Normal"
-    risk_level = "Low"
-
-    if attempt_count > 8:
-        attack_type = "Brute Force"
-        risk_level = "High"
-
-    elif same_password_count > 6:
-        attack_type = "Credential Stuffing"
-        risk_level = "High"
-
-    elif recent_attempts > 10:
-        attack_type = "Bot Attack"
-        risk_level = "High"
-
-    return attack_type, risk_level, attempt_count + 1
+    return timestamp.astimezone(IST).strftime("%H:%M:%S")
 
 
-# GEO LOCATION
-def get_geo(ip):
+def to_ist_timeline_bucket(timestamp):
+    """Convert a timestamp to an IST timeline bucket label."""
 
-    country = "Unknown"
-    city = "Unknown"
-    lat = None
-    lon = None
+    if not timestamp:
+        return None
 
-    try:
+    if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+        timestamp = timestamp.replace(tzinfo=timezone.utc)
 
-        geo = requests.get(
-            f"http://ip-api.com/json/{ip}?fields=status,country,city,lat,lon",
-            timeout=3
-        ).json()
-
-        if geo.get("status") == "success":
-            country = geo.get("country")
-            city = geo.get("city")
-            lat = geo.get("lat")
-            lon = geo.get("lon")
-
-    except:
-        pass
-
-    return country, city, lat, lon
+    return timestamp.astimezone(IST).strftime("%H:%M")
 
 
-# SAVE ATTACK LOG
+# =====================================================
+# LOG ATTACK
+# =====================================================
 def log_attack(service, username, password):
+    """Save a login attempt to MongoDB using UTC timestamps."""
 
-    forwarded = request.headers.get("X-Forwarded-For")
-
-    if forwarded:
-        ip = forwarded.split(",")[0].strip()
-    else:
-        ip = request.remote_addr
-
-    user_agent = request.headers.get("User-Agent")
-
-    timestamp = datetime.utcnow()
-
-    attack_type, risk_level, attempt_count = classify_attack(
-        ip, username, password
-    )
-
+    ip = get_client_ip()
+    user_agent = get_user_agent()
+    timestamp = datetime.now(timezone.utc)
     country, city, lat, lon = get_geo(ip)
 
-    logs_collection.insert_one({
+    attack = classify_attack(
+        ip=ip,
+        username=username,
+        password=password,
+        country=country,
+        service=service,
+    )
 
+    risk_score = generate_risk_score(ip, password)
+
+    log = {
         "service": service,
-
         "ip": ip,
         "username": username,
         "password": password,
         "user_agent": user_agent,
-
         "timestamp": timestamp,
-        "attempt_count": attempt_count,
-
-        "attack_type": attack_type,
-        "risk_level": risk_level,
-
+        "attempt_count": attack["attempt_count"],
+        "attack_type": attack["attack_type"],
+        "risk_level": attack["risk_level"],
+        "ml_prediction": attack["ml_prediction"],
+        "ml_confidence": attack["ml_confidence"],
+        "risk_score": risk_score,
         "country": country,
         "city": city,
-
         "lat": lat,
-        "lon": lon
-    })
+        "lon": lon,
+    }
+
+    logs_collection.insert_one(log)
 
 
-# MAIN LOGIN
+# =====================================================
+# HOME LOGIN
+# =====================================================
 @app.route("/", methods=["GET", "POST"])
 def login():
-
     if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
 
-        username = request.form.get("username")
-        password = request.form.get("password")
-
+        # Allow admin to access dashboard
         if username == "admin" and password == "secure123":
             return redirect("/dashboard")
 
-        log_attack("web_login", username, password)
+        # Log attacker
+        log_attack(
+            service="web_login",
+            username=username,
+            password=password,
+        )
 
         return render_template("login.html", error="Invalid credentials")
 
     return render_template("login.html")
 
 
-# ADMIN PANEL HONEYPOT
+# =====================================================
+# ADMIN HONEYPOT
+# =====================================================
 @app.route("/admin", methods=["GET", "POST"])
 def admin_panel():
-
     if request.method == "POST":
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
 
-        username = request.form.get("username")
-        password = request.form.get("password")
-
-        log_attack("admin_panel", username, password)
+        log_attack(
+            service="admin_panel",
+            username=username,
+            password=password,
+        )
 
         return render_template("login.html", error="Access Denied")
 
     return render_template("login.html")
 
 
+# =====================================================
 # DASHBOARD
+# =====================================================
 @app.route("/dashboard")
 def dashboard():
-
     logs = list(logs_collection.find().sort("timestamp", -1))
+
+    for log in logs:
+        log["display_time"] = to_ist_display_time(log.get("timestamp"))
 
     total_attempts = len(logs)
 
-    attack_counts = Counter(
-        [log.get("attack_type") for log in logs]
+    attack_counter = Counter(log.get("attack_type", "Unknown") for log in logs)
+
+    brute_force_count = attack_counter.get("Brute Force", 0)
+    suspicious_count = attack_counter.get("Credential Stuffing", 0)
+    bot_attack_count = attack_counter.get("Bot Attack", 0)
+    normal_count = attack_counter.get("Normal", 0)
+
+    service_counter = Counter(
+        log.get("service") for log in logs if log.get("service")
     )
 
-    brute_force_count = attack_counts.get("Brute Force", 0)
-    suspicious_count = attack_counts.get("Credential Stuffing", 0)
-    normal_count = attack_counts.get("Normal", 0)
+    web_login_count = service_counter.get("web_login", 0)
+    admin_panel_count = service_counter.get("admin_panel", 0)
 
-    unique_ips = len(set(
-        log.get("ip") for log in logs
-    ))
+    unique_ips = len({log.get("ip") for log in logs})
 
     ips = [log.get("ip") for log in logs]
     users = [log.get("username") for log in logs]
@@ -189,78 +165,108 @@ def dashboard():
     top_attack = Counter(attacks).most_common(1)[0][0] if attacks else "N/A"
     highest_attempt = max(attempts) if attempts else 0
 
-
+    # -------------------------
+    # Timeline
+    # -------------------------
     timeline = defaultdict(int)
 
     for log in logs:
-
-        ts = log.get("timestamp")
-
-        if ts:
-            key = ts.strftime("%H:%M")
-            timeline[key] += 1
+        bucket = to_ist_timeline_bucket(log.get("timestamp"))
+        if bucket:
+            timeline[bucket] += 1
 
     timeline_labels = sorted(timeline.keys())
-    timeline_counts = [timeline[k] for k in timeline_labels]
+    timeline_counts = [timeline[label] for label in timeline_labels]
 
-
+    # -------------------------
+    # Attack Map
+    # -------------------------
     attack_locations = []
 
     for log in logs:
-
         lat = log.get("lat")
         lon = log.get("lon")
 
-        if lat and lon:
+        if lat is not None and lon is not None:
+            attack_locations.append({"lat": lat, "lon": lon})
 
-            attack_locations.append({
-                "lat": lat,
-                "lon": lon
-            })
+    # -------------------------
+    # AI Summary
+    # -------------------------
+    ai_summary = generate_ai_summary()
 
+    average_risk_score = 0
+    if logs:
+        average_risk_score = round(
+            sum(log.get("risk_score", 0) for log in logs) / len(logs),
+            2,
+        )
 
     return render_template(
-
         "dashboard.html",
-
         logs=logs,
-
         total_attempts=total_attempts,
         brute_force_count=brute_force_count,
         suspicious_count=suspicious_count,
+        bot_attack_count=bot_attack_count,
         normal_count=normal_count,
-
+        web_login_count=web_login_count,
+        admin_panel_count=admin_panel_count,
         unique_ips=unique_ips,
-
         top_ip=top_ip,
         top_user=top_user,
         highest_attempt=highest_attempt,
         top_attack=top_attack,
-
         timeline_labels=timeline_labels,
         timeline_counts=timeline_counts,
-
-        attack_locations=attack_locations
+        attack_locations=attack_locations,
+        ai_summary=ai_summary,
+        average_risk_score=average_risk_score,
     )
 
 
-# LIVE API
+# =====================================================
+# LIVE LOG API
+# =====================================================
 @app.route("/api/logs")
 def api_logs():
-
     logs = list(
-        logs_collection
-        .find()
-        .sort("timestamp", -1)
-        .limit(100)
+        logs_collection.find().sort("timestamp", -1).limit(100)
     )
 
     for log in logs:
-        log["_id"] = str(log["_id"])
+        timestamp = log.get("timestamp")
+        if timestamp:
+            if timestamp.tzinfo is None or timestamp.utcoffset() is None:
+                timestamp = timestamp.replace(tzinfo=timezone.utc)
+
+            log["timestamp"] = timestamp.strftime("%Y-%m-%d %H:%M:%S")
 
     return jsonify(logs)
 
 
-# RUN SERVER
+# =====================================================
+# HEALTH CHECK
+# =====================================================
+@app.route("/health")
+def health():
+    try:
+        logs_collection.database.command("ping")
+
+        return jsonify(
+            {
+                "status": "online",
+                "database": "connected",
+                "application": "AI-Honeypot-SOC",
+            }
+        )
+
+    except Exception as e:
+        return jsonify({"status": "error", "database": str(e)}), 500
+
+
+# =====================================================
+# START APPLICATION
+# =====================================================
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=5000)
+    app.run(host="0.0.0.0", port=5000, debug=True)

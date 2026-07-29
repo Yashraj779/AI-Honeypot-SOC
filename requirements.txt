@@ -3,3 +3,8 @@ pymongo
 requests
 gunicorn
 dnspython
+python-dotenv
+numpy
+pandas
+scikit-learn
+joblib

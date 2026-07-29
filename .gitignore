@@ -1,17 +1,52 @@
-# Virtual environments
-venv/
-.venv/
-
-# Python cache
+# ==========================
+# Python
+# ==========================
 __pycache__/
 *.py[cod]
+*$py.class
 
-# Environment variables
+# ==========================
+# Virtual Environment
+# ==========================
+venv/
+env/
+.venv/
+
+# ==========================
+# Environment Variables
+# ==========================
 .env
 
-# VS Code
+# ==========================
+# IDE
+# ==========================
 .vscode/
+.idea/
 
-# OS files
-.DS_Store
+# ==========================
+# Jupyter
+# ==========================
+.ipynb_checkpoints/
+
+# ==========================
+# Logs
+# ==========================
+*.log
+
+# ==========================
+# OS Files
+# ==========================
 Thumbs.db
+desktop.ini
+.DS_Store
+
+# ==========================
+# Python Cache
+# ==========================
+.pytest_cache/
+
+# ==========================
+# Build Files
+# ==========================
+build/
+dist/
