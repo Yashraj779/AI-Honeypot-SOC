@@ -24,4 +24,4 @@ class Config:
 
     LOG_COLLECTION = "logs"
 
-    DEBUG = True
+    DEBUG = os.getenv("FLASK_DEBUG", "False").lower() == "true"
