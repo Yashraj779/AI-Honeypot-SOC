@@ -4,6 +4,13 @@ An AI-powered Honeypot Security Operations Center built using **Flask**, **Mongo
 
 ---
 
+## 🌐 Live Demo
+
+**🔗 Live Application:** [AI Honeypot SOC](https://ai-honeypot-soc-xmu2.onrender.com/)
+
+**📂 GitHub Repository:** https://github.com/Yashraj779/AI-Honeypot-SOC
+
+
 ## 📌 Project Overview
 
 Traditional login systems simply reject invalid login attempts. This project goes a step further by acting as a **honeypot**, intentionally logging attacker activity instead of ignoring it.
